@@ -210,3 +210,8 @@ __marimo__/
 checkpoints/
 __pycache__/
 producer_backup.py
+
+.env
+checkpoints/
+__pycache__/
+producer_backup.py
