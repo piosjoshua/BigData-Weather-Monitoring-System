@@ -11,12 +11,13 @@ IMPLEMENT THE TODO SECTIONS
 
 import streamlit as st
 import pandas as pd
+from pymongo import MongoClient
 import plotly.express as px
 import time
 import json
 from datetime import datetime, timedelta
 from kafka import KafkaConsumer
-from kafka.errors import KafkaError, NoBrokersAvailable
+from kafka.errors import KafkaError
 from streamlit_autorefresh import st_autorefresh
 
 # Page configuration
@@ -46,7 +47,7 @@ def setup_sidebar():
     
     kafka_topic = st.sidebar.text_input(
         "Kafka Topic", 
-        value="streaming-data",
+        value="weather-data",
         help="STUDENT TODO: Specify the Kafka topic to consume from"
     )
     
@@ -55,6 +56,7 @@ def setup_sidebar():
     storage_type = st.sidebar.selectbox(
         "Storage Type",
         ["HDFS", "MongoDB"],
+        index=1,
         help="STUDENT TODO: Choose your historical data storage solution"
     )
     
@@ -89,7 +91,7 @@ def consume_kafka_data(config):
     STUDENT TODO: Implement actual Kafka consumer
     """
     kafka_broker = config.get("kafka_broker", "localhost:9092")
-    kafka_topic = config.get("kafka_topic", "streaming-data")
+    kafka_topic = config.get("kafka_topic", "weather-data")
     
     # Cache Kafka consumer to avoid recreation
     cache_key = f"kafka_consumer_{kafka_broker}_{kafka_topic}"
@@ -158,38 +160,51 @@ def consume_kafka_data(config):
             if messages:
                 return pd.DataFrame(messages)
             else:
-                st.info("No messages received from Kafka. Using sample data.")
-                return generate_sample_data()
+                st.info("No new messages received from Kafka yet.")
+                return pd.DataFrame(columns=["timestamp", "value", "metric_type", "sensor_id"])
                 
-        except (NoBrokersAvailable, KafkaError, Exception) as e:
-            error_type = "Kafka broker unavailable" if isinstance(e, NoBrokersAvailable) else f"Kafka error: {e}" if isinstance(e, KafkaError) else f"Unexpected error: {e}"
-            st.error(f"{error_type}. Using sample data.")
-            return generate_sample_data()
+        except Exception as e:
+            error_type = f"Kafka error: {e}"
+            st.error(f"{error_type}.")
+            return pd.DataFrame(columns=["timestamp", "value", "metric_type", "sensor_id"])
     else:
-        st.error("Unable to connect to Kafka. Using sample data.")
-        return generate_sample_data()
+        st.error("Unable to connect to Kafka.")
+        return pd.DataFrame(columns=["timestamp", "value", "metric_type", "sensor_id"])
 
 def query_historical_data(time_range="1h", metrics=None):
-    """
-    STUDENT TODO: Implement actual historical data query
-    
-    This function should:
-    1. Connect to HDFS/MongoDB
-    2. Query historical data based on time range and selected metrics
-    3. Return aggregated historical data
-    
-    Parameters:
-    - time_range: time period to query (e.g., "1h", "24h", "7d")
-    - metrics: list of metric types to include
-    
-    Expected return format:
-    pandas DataFrame with historical data
-    """
-    # STUDENT TODO: Replace with actual storage query
-    st.warning("STUDENT TODO: Implement historical data query in query_historical_data() function")
-    
-    # Return sample data for template demonstration
-    return generate_sample_data()
+    """Query historical weather readings from MongoDB."""
+    range_seconds = {
+        "1h": 3600,
+        "24h": 86400,
+        "7d": 7 * 86400,
+        "30d": 30 * 86400,
+    }
+    cutoff = datetime.now() - timedelta(
+        seconds=range_seconds.get(time_range, 3600)
+    )
+
+    try:
+        client = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=3000)
+        collection = client["weather_db"]["weather_readings"]
+
+        query = {"timestamp": {"$gte": cutoff}}
+        if metrics:
+            query["metric_type"] = {"$in": metrics}
+
+        records = list(collection.find(query, {"_id": 0}).sort("timestamp", 1))
+        client.close()
+
+        if not records:
+            return pd.DataFrame(
+                columns=["timestamp", "value", "metric_type", "sensor_id"]
+            )
+
+        return pd.DataFrame(records)
+    except Exception as error:
+        st.error(f"MongoDB historical query failed: {error}")
+        return pd.DataFrame(
+            columns=["timestamp", "value", "metric_type", "sensor_id"]
+        )
 
 
 def display_real_time_view(config, refresh_interval):
