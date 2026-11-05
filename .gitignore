@@ -215,3 +215,8 @@ producer_backup.py
 checkpoints/
 __pycache__/
 producer_backup.py
+
+app_backup.py
+.env
+checkpoints/
+__pycache__/
